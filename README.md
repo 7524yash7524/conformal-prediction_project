@@ -36,3 +36,59 @@ This project addresses those failure modes by:
 ---
 
 ## 🛠️ Methodology & Workflow
+
+┌─────────────────┐     ┌───────────────────────┐     ┌──────────────────────┐
+│  Market Data    │     │   Chronos-2 Forecaster│     │ Calibration Metrics  │
+│ (Sensex / Nifty)│ ──> │ (Zero-Shot Inference) │ ──> │ (PIT, Coverage Rate) │
+└─────────────────┘     └───────────────────────┘     └──────────┬───────────┘
+│
+▼
+┌─────────────────┐     ┌───────────────────────┐     ┌──────────────────────┐
+│ Adaptive Bands  │     │ Conformal Recalibrate │     │ Miscalibration       │
+│  (ACI Update)   │ <── │ (Fixed Split vs ACI)  │ <── │ Diagnostic Trigger   │
+└─────────────────┘     └───────────────────────┘     └──────────────────────┘
+
+### 1. Conformal Prediction Formulation
+For a target confidence level $1 - \alpha = 0.90$, we define non-conformity scores $s_i$ over a calibration set using residuals between actual asset prices/returns $Y_i$ and model quantiles $\hat{q}$:
+
+$$s_i = \max \left( \hat{q}_{\alpha/2}(X_i) - Y_i, \; Y_i - \hat{q}_{1 - \alpha/2}(X_i) \right)$$
+
+The conformal quantile $Q_{1-\alpha}(s)$ is then added to widen or narrow intervals, guaranteeing valid empirical coverage regardless of underlying data distribution.
+
+### 2. Adaptive Conformal Inference (ACI)
+To handle time-series non-stationarity, ACI adjusts the effective alpha $\alpha_t$ dynamically at each step $t$:
+
+$$\alpha_{t+1} = \alpha_t + \gamma (\alpha - \mathbf{1}_{\{Y_t \notin \hat{C}_t\}})$$
+
+where $\gamma$ is the learning rate governing adaptation speed to sudden volatility spikes.
+
+---
+
+## 📂 Repository Structure
+
+```text
+conformal-prediction_project/
+├── data/
+│   ├── raw/                # Historical BSE Sensex & NSE Nifty 50 data
+│   └── processed/          # Formatted time series & returns split
+├── notebooks/
+│   ├── 01_data_exploration.ipynb
+│   ├── 02_chronos_baseline_forecasting.ipynb
+│   ├── 03_pit_diagnostics_coverage.ipynb
+│   └── 04_conformal_and_aci_benchmarks.ipynb
+├── src/
+│   ├── models/
+│   │   └── chronos_wrapper.py     # Chronos-2 inference interface
+│   ├── conformal/
+│   │   ├── split_conformal.py     # Fixed Conformal Prediction implementation
+│   │   └── aci.py                 # Adaptive Conformal Inference engine
+│   ├── metrics/
+│   │   └── calibration.py         # Empirical coverage & PIT histogram calculations
+│   └── visualization/
+│       └── plots.py               # Interval and diagnostic plotting utilities
+├── docs/
+│   ├── project_guide.pdf          # Full technical guide & mathematical details
+│   └── blog_series/               # Explanatory guides on calibration diagnostics
+├── requirements.txt               # Dependencies
+├── LICENSE                        # License file
+└── README.md                      # Project documentation
