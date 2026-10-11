@@ -1,94 +1,105 @@
-# Uncertainty Quantification & Conformal Prediction in Financial Time Series
+# Chronos-2 Calibration Audit: Sensex & Nifty 50
 
-[![Python](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://www.python.org/)
-[![Framework](https://img.shields.io/badge/Model-Amazon--Chronos--2-orange.svg)](https://github.com/amazon-science/chronos-forecasting)
-[![Focus](https://img.shields.io/badge/Focus-Conformal%20Prediction%20%26%20ACI-green.svg)](#methodology)
+Do the prediction intervals of a zero-shot time-series foundation model (Amazon **Chronos-2**) cover as often as they claim? I tested this on the BSE Sensex and NSE Nifty 50, then tried to fix it with conformal prediction.
 
-An end-to-end research and engineering framework evaluating uncertainty quantification and distribution-free risk calibration for zero-shot time series foundation models (**Amazon Chronos-2**). Applied directly to major financial indices (**BSE Sensex** & **NSE Nifty 50**), this project diagnoses probabilistic miscalibration and guarantees distribution-free coverage bounds using **Fixed Conformal Prediction** and **Adaptive Conformal Inference (ACI)**.
+**Paper:** [SSRN 7300198](https://doi.org/10.2139/ssrn.7300198) &nbsp;|&nbsp; **Blog series:** [Medium](https://medium.com/@ysrivastava470) &nbsp;|&nbsp; **Follow-up project:** [coverage-aware-guardrails](https://github.com/7524yash7524/coverage-aware-guardrails)
 
----
+![Python](https://img.shields.io/badge/Python-3.10%2B-blue.svg)
+![Model](https://img.shields.io/badge/Model-amazon%2Fchronos--2-orange.svg)
+![Topic](https://img.shields.io/badge/Topic-Conformal%20Prediction-green.svg)
 
-## 📌 Overview
+## Main findings
 
-Traditional probabilistic point and interval forecasts in financial markets frequently suffer from **overconfidence** during periods of high volatility and regime shifts. While foundational time series models like Amazon's Chronos-2 provide powerful zero-shot predictions, their out-of-the-box prediction intervals often fail to maintain valid statistical coverage guarantees when market distributions shift.
+All coverage numbers below are for the model's 10th to 90th percentile interval, which claims **80%** coverage.
 
-This project addresses those failure modes by:
-1. **Diagnosing Model Miscalibration:** Identifying overconfidence using **Probability Integral Transform (PIT) histograms** and empirical coverage metrics across multiple prediction horizons.
-2. **Guaranteed Coverage via Conformal Prediction:** Applying distribution-free Split Conformal Prediction to produce valid $1 - \alpha$ prediction bands.
-3. **Dynamic Adaptation in Non-Stationary Markets:** Implementing **Adaptive Conformal Inference (ACI)** to dynamically recalibrate interval widths following sudden regime shifts.
-4. **Analyzing the "Horizon Reversal Effect":** Evaluating how forecasting horizon lengths interact with volatility regimes and interval widening/narrowing dynamics.
+1. **The intervals under-cover, and this gets worse after the first day.**
 
----
+   | Days ahead | Sensex coverage | Nifty coverage |
+   |---:|---:|---:|
+   | 1 | 80.7% | 80.6% |
+   | 2 | 73.6% | 75.4% |
+   | 16 | 74.1% | 70.7% |
+   | 30 | 74.4% | 75.4% |
 
-## ⚙️ Key Features
+   Sensex: 352 forecast windows. Nifty: 403 forecast windows.
 
-* **Foundation Model Integration:** Uses Amazon's **Chronos-2** pretrained model as the underlying probabilistic forecaster.
-* **Miscalibration Diagnostics:**
-  * Empirical coverage tracking against nominal target confidence (e.g., $90\%$ target coverage).
-  * Probability Integral Transform (PIT) histogram generation to detect underdispersion, overdispersion, or asymmetric bias.
-* **Conformal Methods Implemented:**
-  * **Fixed Split Conformal Prediction:** Computes non-conformity scores over calibration windows to yield distribution-free prediction bands.
-  * **Adaptive Conformal Inference (ACI):** Dynamically updates the nominal level $\alpha_t$ step-by-step using online learning to maintain target coverage under distribution shifts.
-* **Regime Shift & Horizon Analytics:**
-  * Empirical tracking of **recovery speed** following volatility spikes.
-  * Quantitative analysis of the **Horizon Reversal Effect** across varying forecast horizons ($h \in \{1, 5, 10, 20\}$ days).
+2. **Calibration depends on the volatility regime, and the pattern flips with the horizon (I call this the "Horizon Reversal Effect").**
 
----
+   | | Low-vol coverage | High-vol coverage |
+   |---|---:|---:|
+   | Sensex, day 1 | 83.8% (n=197) | 76.8% (n=155) |
+   | Sensex, day 30 | 70.1% | 80.0% |
+   | Nifty, day 1 | 85.7% (n=223) | 74.4% (n=180) |
+   | Nifty, day 30 | 71.7% | 80.0% |
 
-## 🛠️ Methodology & Workflow
+   Low-vol minus high-vol coverage gap, with 95% bootstrap intervals (2,000 resamples):
 
-┌─────────────────┐     ┌───────────────────────┐     ┌──────────────────────┐
-│  Market Data    │     │   Chronos-2 Forecaster│     │ Calibration Metrics  │
-│ (Sensex / Nifty)│ ──> │ (Zero-Shot Inference) │ ──> │ (PIT, Coverage Rate) │
-└─────────────────┘     └───────────────────────┘     └──────────┬───────────┘
-│
-▼
-┌─────────────────┐     ┌───────────────────────┐     ┌──────────────────────┐
-│ Adaptive Bands  │     │ Conformal Recalibrate │     │ Miscalibration       │
-│  (ACI Update)   │ <── │ (Fixed Split vs ACI)  │ <── │ Diagnostic Trigger   │
-└─────────────────┘     └───────────────────────┘     └──────────────────────┘
+   | | Day 1 | Day 30 |
+   |---|---|---|
+   | Sensex | +6.9 pts [-1.1, 15.1] | -9.9 pts [-18.9, -0.8] |
+   | Nifty | +11.2 pts [3.6, 18.9] | -8.2 pts [-16.9, 0.1] |
 
-### 1. Conformal Prediction Formulation
-For a target confidence level $1 - \alpha = 0.90$, we define non-conformity scores $s_i$ over a calibration set using residuals between actual asset prices/returns $Y_i$ and model quantiles $\hat{q}$:
+   The sign flips within the first few days on both indices, and the two gap curves are correlated at 0.52. Not every gap is statistically strong: Sensex day 1 and Nifty day 30 have intervals that touch zero.
 
-$$s_i = \max \left( \hat{q}_{\alpha/2}(X_i) - Y_i, \; Y_i - \hat{q}_{1 - \alpha/2}(X_i) \right)$$
+3. **Conformal correction helps, but does not reach the target.** On Sensex at 16 days ahead (211 calibration windows, 141 test windows):
 
-The conformal quantile $Q_{1-\alpha}(s)$ is then added to widen or narrow intervals, guaranteeing valid empirical coverage regardless of underlying data distribution.
+   | Method | Coverage | Average width |
+   |---|---:|---:|
+   | Raw Chronos-2 | 75.2% | 5,152 |
+   | Split conformal | 78.0% | 5,387 (+4.6%) |
+   | Adaptive conformal (ACI, gamma = 0.01) | 78.7% | 5,630 |
 
-### 2. Adaptive Conformal Inference (ACI)
-To handle time-series non-stationarity, ACI adjusts the effective alpha $\alpha_t$ dynamically at each step $t$:
+   Both methods stay below 80% because market data is not exchangeable, so the finite-sample guarantee does not hold exactly.
 
-$$\alpha_{t+1} = \alpha_t + \gamma (\alpha - \mathbf{1}_{\{Y_t \notin \hat{C}_t\}})$$
+4. **ACI showed no clear advantage right after regime shifts in this data.** Fixed and adaptive conformal both reached 80.0% coverage after the 26 detected shift points, and 86.7% after the 3 clean shifts (a very small sample).
 
-where $\gamma$ is the learning rate governing adaptation speed to sudden volatility spikes.
+5. **High-volatility intervals are much wider in relative terms.** At 30 days ahead, Sensex intervals are 15.3% of price in high-vol periods versus 10.7% in low-vol periods (+44%). Nifty is similar (15.8% vs 10.9%).
 
----
+## Method
 
-## 📂 Repository Structure
+- **Forecaster:** `amazon/chronos-2`, zero-shot, 512-day context, 30-day horizon, 11 quantile levels (0.05 to 0.95), rolling windows with a step of 10 days.
+- **Diagnostics:** empirical coverage by horizon and PIT histograms.
+- **Regimes:** a day is "high-vol" if its 20-day rolling volatility is above the median, otherwise "low-vol".
+- **Split conformal:** chronological 60/40 calibration/test split. Non-conformity score `s = max(q_lo - y, y - q_hi)`, and the intervals are widened by the target quantile of `s`.
+- **ACI:** online update `alpha_t+1 = alpha_t + gamma * (alpha - miss_t)`.
 
-```text
-conformal-prediction_project/
-├── data/
-│   ├── raw/                # Historical BSE Sensex & NSE Nifty 50 data
-│   └── processed/          # Formatted time series & returns split
-├── notebooks/
-│   ├── 01_data_exploration.ipynb
-│   ├── 02_chronos_baseline_forecasting.ipynb
-│   ├── 03_pit_diagnostics_coverage.ipynb
-│   └── 04_conformal_and_aci_benchmarks.ipynb
-├── src/
-│   ├── models/
-│   │   └── chronos_wrapper.py     # Chronos-2 inference interface
-│   ├── conformal/
-│   │   ├── split_conformal.py     # Fixed Conformal Prediction implementation
-│   │   └── aci.py                 # Adaptive Conformal Inference engine
-│   ├── metrics/
-│   │   └── calibration.py         # Empirical coverage & PIT histogram calculations
-│   └── visualization/
-│       └── plots.py               # Interval and diagnostic plotting utilities
-├── docs/
-│   ├── project_guide.pdf          # Full technical guide & mathematical details
-│   └── blog_series/               # Explanatory guides on calibration diagnostics
-├── requirements.txt               # Dependencies
-├── LICENSE                        # License file
-└── README.md                      # Project documentation
+## Notebooks
+
+| Notebook | What it does |
+|---|---|
+| `01_load_forecast` | Runs Chronos-2 over rolling Sensex windows |
+| `02_calibration_check` | Coverage and PIT histograms at days 1, 2, 16 and 30 |
+| `03_conformal_prediction` | Split conformal correction |
+| `04_adaptive_conformal` | ACI |
+| `05_final_comparison` | Side-by-side comparison |
+| `06`, `07` | Same forecasts and calibration check for Nifty |
+| `08` to `10` | Volatility regimes, regime-conditional coverage, bootstrap significance |
+| `11` | Crossover analysis of the Horizon Reversal Effect |
+| `12`, `13` | Recovery after regime shifts (all shifts, then clean shifts only) |
+| `14` | Check that results hold in percent-of-price terms |
+
+`baseline/` holds a classical SARIMAX forecaster and a script that runs the same calibration audit on it for comparison.
+
+## Reproduce
+
+```bash
+pip install numpy pandas matplotlib torch chronos-forecasting jupyter
+jupyter notebook notebooks/
+```
+
+Run the notebooks in order from inside the `notebooks/` folder. The forecasts used in the analysis are saved in `data/` as `.npy` files, so you can inspect the results without re-running the model. Notebooks 01 and 06 download the model and are slow on CPU.
+
+## Limitations
+
+- One model (Chronos-2), two indices, one chronological split, and small test sets (141 windows for the conformal comparison).
+- The conformal guarantee assumes exchangeable data, which price series are not. That is why the corrected coverage still falls short of 80%.
+- Forecast windows start every 10 days but look 30 days ahead, so neighbouring windows overlap. They are not independent, and the confidence intervals above are probably narrower than they should be.
+- Regimes use a simple median-volatility rule.
+
+## Author
+
+Yash Chitransh, M.Sc. Mathematics & Scientific Computing, NIT Warangal. [LinkedIn](https://www.linkedin.com/in/yash-chitransh-4b108b2aa)
+
+## License
+
+MIT, see `LICENSE`.
